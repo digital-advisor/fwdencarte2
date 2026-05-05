@@ -30,31 +30,9 @@ async function startServer() {
     const configBucket = adminStorage.app.options.storageBucket;
     const projectId = adminStorage.app.options.projectId;
     
-    // AI Studio storage often works with the config bucket, 
-    // but sometimes it fails metadata checks due to permission 403.
-    // We try to return it even if getMetadata fails, but we try a few variants first.
-    const names = [
-        configBucket,
-        `${projectId}.appspot.com`,
-        `${projectId}.firebasestorage.app`
-    ].filter(Boolean) as string[];
-
-    for (const name of names) {
-        try {
-            const b = adminStorage.bucket(name);
-            await b.getMetadata();
-            resolvedBucket = b;
-            return b;
-        } catch (e: any) {
-             if (e.code === 403) {
-                 // 403 means it exists but we can't see metadata. Use it anyway.
-                 resolvedBucket = adminStorage.bucket(name);
-                 return resolvedBucket;
-             }
-        }
-    }
-
-    resolvedBucket = adminStorage.bucket(configBucket || (projectId ? `${projectId}.appspot.com` : undefined));
+    // For Netlify, try the config bucket directly
+    const bucketName = configBucket || `${projectId}.appspot.com`;
+    resolvedBucket = adminStorage.bucket(bucketName);
     return resolvedBucket;
   };
 

@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "start": "node dist/server.cjs",
     "build:server": "esbuild server.ts --platform=node --target=node18 --bundle --outfile=dist/server.cjs --format=cjs",
-    "build": "vite build && npm run build:server",
+    "build": "cp firebase-applet-config.json dist/ && vite build && npm run build:server",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
