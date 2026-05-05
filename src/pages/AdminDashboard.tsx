@@ -3,17 +3,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { auth, db, storage } from '../lib/firebase/client';
+import { auth, db } from '../lib/firebase/client';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata as getStorageMetadata } from 'firebase/storage';
 import { toast } from 'sonner';
-import { Trash2, File, Loader2, Link } from 'lucide-react';
+import { Trash2, File, Loader2 } from 'lucide-react';
 import { cn } from "@/lib/utils";
 
 export default function AdminDashboard() {
   const [config, setConfig] = useState<any>({});
-  const [apiKey, setApiKey] = useState('');
-  const [files, setFiles] = useState<{name: string, url: string, rawRef: any}[]>([]);
+  const [files, setFiles] = useState<{name: string, url: string, fullPath: string, size?: number, updated?: string}[]>([]);
   const [uploading, setUploading] = useState(false);
   
   useEffect(() => {
@@ -21,40 +19,26 @@ export default function AdminDashboard() {
      loadFiles();
   }, []);
 
+  const getAuthToken = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Usuário não autenticado.');
+    return token;
+  };
+
   const loadFiles = async () => {
     try {
-        const storageRef = ref(storage, 'admin/knowledge-base/');
-        const result = await listAll(storageRef);
-        
-        const filePromises = result.items.map(async (item) => {
-            const url = await getDownloadURL(item);
-            const metadata = await getStorageMetadata(item);
-            return {
-                name: item.name,
-                url: url,
-                fullPath: item.fullPath,
-                size: metadata.size,
-                updated: metadata.updated
-            };
+        const token = await getAuthToken();
+        const res = await fetch('/api/admin/files', {
+            headers: { Authorization: `Bearer ${token}` }
         });
-        
-        const fileList = await Promise.all(filePromises);
-        setFiles(fileList);
-    } catch(e: any) {
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `Erro ao carregar arquivos (${res.status})`);
+        }
+        const data = await res.json();
+        setFiles(data.files || []);
+    } catch (e: any) {
         console.error("Error loading files", e);
-        // Fallback to server API if client-side fails (unlikely if server fails too)
-        try {
-            const token = await auth.currentUser?.getIdToken();
-            const res = await fetch('/api/admin/files', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setFiles(data.files);
-                return;
-            }
-        } catch (innerE) {}
-        
         toast.error("Erro ao carregar arquivos: " + e.message);
     }
   };
@@ -65,35 +49,24 @@ export default function AdminDashboard() {
       
       setUploading(true);
       try {
+          const token = await getAuthToken();
+          const formData = new FormData();
           for (let i = 0; i < selectedFiles.length; i++) {
-              const file = selectedFiles[i];
-              const storageRef = ref(storage, `admin/knowledge-base/${file.name}`);
-              await uploadBytes(storageRef, file);
+              formData.append('files', selectedFiles[i]);
           }
-          
+          const res = await fetch('/api/admin/files', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData
+          });
+          if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data?.error?.message || data?.error || `Erro no upload (${res.status})`);
+          }
           toast.success("Arquivos enviados com sucesso!");
-          loadFiles();
+          await loadFiles();
       } catch (err: any) {
           console.error("Upload error", err);
-          // Fallback to server API
-          try {
-              const token = await auth.currentUser?.getIdToken();
-              const formData = new FormData();
-              for (let i = 0; i < selectedFiles.length; i++) {
-                  formData.append('files', selectedFiles[i]);
-              }
-              const res = await fetch('/api/admin/files', {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}` },
-                  body: formData
-              });
-              if (res.ok) {
-                  toast.success("Arquivos enviados (via fallback)!");
-                  loadFiles();
-                  return;
-              }
-          } catch (innerE) {}
-          
           toast.error("Erro no upload: " + err.message);
       } finally {
           setUploading(false);
@@ -102,32 +75,25 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteFile = async (file: any) => {
-      if(!confirm(`Excluir ${file.name}?`)) return;
+      if (!confirm(`Excluir ${file.name}?`)) return;
       try {
-          const storageRef = ref(storage, file.fullPath);
-          await deleteObject(storageRef);
+          const token = await getAuthToken();
+          const res = await fetch('/api/admin/files', {
+              method: 'DELETE',
+              headers: { 
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ fullPath: file.fullPath })
+          });
+          if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error || `Erro ao excluir (${res.status})`);
+          }
           toast.success("Arquivo excluído.");
-          loadFiles();
+          await loadFiles();
       } catch (err: any) {
           console.error("Delete error", err);
-          // Fallback to server API
-          try {
-              const token = await auth.currentUser?.getIdToken();
-              const res = await fetch('/api/admin/files', {
-                  method: 'DELETE',
-                  headers: { 
-                      'Authorization': `Bearer ${token}`,
-                      'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({ fullPath: file.fullPath })
-              });
-              if (res.ok) {
-                  toast.success("Arquivo excluído (via fallback).");
-                  loadFiles();
-                  return;
-              }
-          } catch (innerE) {}
-          
           toast.error("Erro ao excluir: " + err.message);
       }
   };
@@ -298,7 +264,7 @@ export default function AdminDashboard() {
                                                     </a>
                                                     {f.size && (
                                                         <span className="text-[10px] text-slate-400">
-                                                            {(Number(f.size) / 1024).toFixed(1)} KB • {new Date(f.updated).toLocaleDateString()}
+                                                            {(Number(f.size) / 1024).toFixed(1)} KB • {f.updated ? new Date(f.updated).toLocaleDateString() : ''}
                                                         </span>
                                                     )}
                                                 </div>
